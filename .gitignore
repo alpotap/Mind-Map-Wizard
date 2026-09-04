@@ -1,0 +1,32 @@
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs (this app writes no server-side logs; browser data lives in
+# localStorage/IndexedDB, not on disk, but keep these in case tooling adds logs)
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies / build output (not currently used, but ignored preemptively)
+node_modules/
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# AI coding assistant local data/session logs
+.claude/
+.copilot/
+.github/copilot/

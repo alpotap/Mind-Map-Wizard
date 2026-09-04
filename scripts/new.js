@@ -111,11 +111,13 @@ function aiRequiresApiKey() {
 
 function getAiRequestHeaders(apiKey) {
 	const headers = {
-		'Content-Type': 'application/json',
-		'HTTP-Referer': window.location.origin,
-		'X-Title': 'Mind Map Wizard'
+		'Content-Type': 'application/json'
 	};
+	// OpenRouter-only headers: local providers like Ollama don't allow-list
+	// these in their CORS config, so sending them there breaks the preflight.
 	if (!isLocalProvider()) {
+		headers['HTTP-Referer'] = window.location.origin;
+		headers['X-Title'] = 'Mind Map Wizard';
 		headers['Authorization'] = `Bearer ${apiKey || getStoredApiKey()}`;
 	}
 	return headers;
@@ -1126,17 +1128,21 @@ Structure your response exactly like this:
 	} catch (error) {
 		console.error('Error generating the mindmap:', error);
 
-		let userMessage = 'An error occurred while generating the mindmap.';
+		let userMessage = `An error occurred while generating the mindmap. ${error.message || ''}`.trim();
 		let shouldShowError = true;
 
 		if (error.message.includes('Rate limit')) {
 			userMessage = 'Too many requests. Please wait a moment before trying again.';
-		} else if (error.message.includes('network') || error.message.includes('fetch')) {
-			userMessage = 'Network error. Please check your connection and try again.';
 		} else if (error.message.includes('security')) {
 			userMessage = 'Content validation failed. Please try a different topic.';
 		} else if (error.message.includes('API key')) {
 			userMessage = error.message;
+		} else if (isLocalProvider() && /failed to fetch|networkerror|load failed/i.test(error.message)) {
+			userMessage = `Couldn't reach Ollama at ${getOllamaBaseUrl()}. Make sure Ollama is running and that OLLAMA_ORIGINS includes this page's origin (${window.location.origin}).`;
+		} else if (isLocalProvider() && /not found|try pulling/i.test(error.message)) {
+			userMessage = `Model "${getSelectedModel()}" isn't available in Ollama. Pull it with "ollama pull ${getSelectedModel()}" or pick another model from the dropdown.`;
+		} else if (error.message.includes('network') || error.message.includes('fetch')) {
+			userMessage = 'Network error. Please check your connection and try again.';
 		}
 
 		if (shouldShowError) {

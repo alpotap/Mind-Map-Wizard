@@ -51,17 +51,8 @@ const ImageHandler = {
         }
     },
 
-    _trackImageUpload: async function(imageRef) {
-        console.log('[ImageHandler] Tracking image upload:', imageRef);
-        try {
-            const response = await fetch(
-                'https://stats.mindmapwizard.com/hit/mmw/image-uploaded', {
-                method: 'GET',
-            });
-            console.log('[ImageHandler] Stats hit response:', response.status);
-        } catch (trackingError) {
-            console.error('[ImageHandler] Tracking Error:', trackingError);
-        }
+    _trackImageUpload: function(imageRef) {
+        // No-op: image uploads are never reported externally.
     },
 
     ready: function() {
@@ -515,14 +506,8 @@ const ImageHandler = {
     },
     
     _isAuthenticated: async function() {
-        try {
-            const clerk = (typeof Clerk !== 'undefined') ? Clerk : window.Clerk;
-            if (!clerk) return false;
-            await clerk.load();
-            return !!(clerk.user && clerk.session);
-        } catch (e) {
-            return false;
-        }
+        // Remote storage is disabled: images always stay local, never uploaded.
+        return false;
     },
     
     _getAuthToken: async function() {

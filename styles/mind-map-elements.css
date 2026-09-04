@@ -48,6 +48,53 @@
     } 
 }
 
+/* Manual theme override (takes precedence over prefers-color-scheme) */
+:root[data-theme="dark"] {
+    --primary-color: #59008e;
+    --secondary-color: #7723a4;
+    --background-color: #131515;
+    --text-color: #CCC7C1;
+    --light-grey: #232627;
+    --light-grey-dark: #282b2d;
+    --dark-grey: #85919b;
+
+    --card-background: #181a1b;
+
+    --white: #181A1B;
+    --white-dark: #1C1E1F;
+    --red: #a51d2a;
+    --red-dark: #8e202b;
+
+    --button-color: var(--primary-color);
+    --button--hover-color: var(--secondary-color);
+
+    --mindmap-item-bg: var(--white);
+    --mindmap-item-hover-bg: #1E2021;
+}
+
+:root[data-theme="light"] {
+    --primary-color: #c667ff;
+    --secondary-color: #9d34d4;
+    --background-color: #f7fafc;
+    --text-color: #1e293b;
+    --light-grey: #e8ecef;
+    --light-grey-dark: #dbe2ea;
+    --dark-grey: #717b83;
+
+    --card-background: #ffffff;
+
+    --white: #ffffff;
+    --white-dark: #f8f8f8;
+    --red: #dc3545;
+    --red-dark: #B12836;
+
+    --button-color: var(--text-color);
+    --button--hover-color: #000;
+
+    --mindmap-item-bg: var(--white);
+    --mindmap-item-hover-bg: #f5f5f7;
+}
+
 .url-input-backdrop {
     position: fixed;
     top: 0;
@@ -675,6 +722,24 @@
     .citation-pill:hover {
         background: rgba(255, 255, 255, 0.25);
     }
+}
+
+[data-theme="dark"] .citation-pill {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .citation-pill:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="light"] .citation-pill {
+    background: rgba(80, 80, 80, 0.1);
+    border-color: transparent;
+}
+
+[data-theme="light"] .citation-pill:hover {
+    background: rgba(80, 80, 80, 0.2);
 }
 
 

@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function () {
 	if (typeof handleUrlParameters === 'function') handleUrlParameters();
 	initSidebar();
 	initializeKeyboardShortcuts();
+	initThemeSelector();
 
 	const newMindMapBtn = document.getElementById('new-mind-map-button');
 	if (newMindMapBtn) {
@@ -468,6 +469,45 @@ function hideInitialElements() {
 	});
 }
 
+// ---- Theme selection: system (prefers-color-scheme), forced light, or forced dark ----
+const THEME_PREFERENCE_KEY = 'mmw-theme-preference';
+
+function getThemePreference() {
+	const pref = localStorage.getItem(THEME_PREFERENCE_KEY);
+	return (pref === 'light' || pref === 'dark') ? pref : 'system';
+}
+
+function applyThemePreference(pref) {
+	if (pref === 'light' || pref === 'dark') {
+		document.documentElement.setAttribute('data-theme', pref);
+	} else {
+		document.documentElement.removeAttribute('data-theme');
+	}
+}
+
+function updateThemeSelectorUI(pref) {
+	document.querySelectorAll('.theme-option').forEach((btn) => {
+		btn.classList.toggle('selected', btn.dataset.theme === pref);
+	});
+}
+
+function setThemePreference(pref) {
+	localStorage.setItem(THEME_PREFERENCE_KEY, pref);
+	applyThemePreference(pref);
+	updateThemeSelectorUI(pref);
+}
+
+function initThemeSelector() {
+	const pref = getThemePreference();
+	applyThemePreference(pref);
+	updateThemeSelectorUI(pref);
+
+	document.querySelectorAll('.theme-option').forEach((btn) => {
+		btn.addEventListener('click', () => setThemePreference(btn.dataset.theme));
+	});
+}
+
+
 function showMindmapElements() {
 	const elementsToShow = [{
 		id: 'button-container',
@@ -615,13 +655,6 @@ window.toggleSidebar = toggleSidebar;
 window.closeSidebar = closeSidebar;
 
 window.onload = function () {
-	if (window.location.hostname === 'mind-map-wizard.pages.dev') {
-		window.location.href =
-			'https://mindmapwizard.com' +
-			window.location.pathname +
-			window.location.search;
-	}
-
 	const pattern = `
             
                       [                  

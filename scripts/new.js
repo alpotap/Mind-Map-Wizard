@@ -1042,14 +1042,6 @@ Structure your response exactly like this:
 				...(contextUrls.length ? { contextUrls } : {}),
 				playPopAnimation: true
 			});
-			try {
-				await fetch(
-				'https://stats.mindmapwizard.com/hit/mmw-os/mind-map-generated', {
-				method: 'GET',
-				});
-			} catch (trackingError) {
-				console.error('Tracking Error:', trackingError);
-			}
 			let mmjsonStr = '';
 			try {
 				const ed = document.getElementById('json-editor');
@@ -1281,15 +1273,6 @@ Context: ${branchContext}`;
 				const oldChildren = window.replaceNodeChildren(nodeId, markdown);
 				if (loader) loader.classList.remove('active');
 				window.expandNodeChildren(nodeId);
-
-				try {
-					await fetch(
-					'https://stats.mindmapwizard.com/hit/mmw-os/mind-map-expanded', {
-					method: 'GET',
-					});
-				} catch (trackingError) {
-					console.error('Tracking Error:', trackingError);
-				}
 
 				if (oldChildren) {
 					const existingRevertContainer = document.getElementById('revert-changes-container');
@@ -2271,14 +2254,6 @@ async function handlePdfUpload(file) {
 		if (!finalMarkdown) throw new Error('Generated markdown content is empty or invalid after processing.');
 		hideHeader();
 		await window.renderMindmap(finalMarkdown, { playPopAnimation: true });
-		try {
-			await fetch(
-			'https://stats.mindmapwizard.com/hit/mmw-os/mind-map-generated-pdf', {
-			method: 'GET',
-			});
-		} catch (trackingError) {
-			console.error('Tracking Error:', trackingError);
-		}
 		let mmjsonStr = '';
 		try {
 			const ed = document.getElementById('json-editor');
@@ -3647,46 +3622,9 @@ async function shareMindmap() {
 		}, 300);
 	}
 
-	window.copyShareLink = function () {
-		const input = document.querySelector('.share-link');
-		if (input) {
-			input.select();
-			input.setSelectionRange(0, 99999);
-			navigator.clipboard.writeText(input.value);
-
-			const copyButton = document.querySelector('.dialog-button.confirm');
-			if (copyButton) {
-				copyButton.textContent = 'Copied!';
-				setTimeout(() => { copyButton.textContent = 'Copy Link'; }, 2000);
-			}
-		}
-	}
-
-
 	shareOverlay.addEventListener('click', window.closeShareDialog);
 
-	function loadQRCodeLibrary() {
-		return new Promise((resolve, reject) => {
-			if (typeof QRCode !== 'undefined') {
-				resolve();
-				return;
-			}
-
-			const existingScript = document.querySelector('script[src="/scripts/libraries/qrcode.min.js"]');
-			if (existingScript) {
-				existingScript.onload = resolve;
-				existingScript.onerror = reject;
-				return;
-			}
-
-			const script = document.createElement('script');
-			script.src = '/scripts/libraries/qrcode.min.js';
-			script.onload = resolve;
-			script.onerror = () => reject(new Error('Failed to load QR code library'));
-			document.head.appendChild(script);
-		});
-	}
-
+	// Sharing is fully local: export the mind map JSON as a file, nothing is sent to any server.
 	try {
 		updateCurrentMindmap();
 		const topic = currentMindmap.topic || currentMindmapTitle || 'Mind Map';
@@ -3705,99 +3643,26 @@ async function shareMindmap() {
 		if (!mmjsonStr || !mmjsonStr.trim()) {
 			throw new Error('No JSON mind map available to share');
 		}
-		let mmjsonPayload;
-		try {
-			mmjsonPayload = JSON.parse(mmjsonStr);
-		} catch {
-			mmjsonPayload = mmjsonStr;
-		}
 
-
-		let headers = {
-			'Content-Type': 'application/json',
-		};
-
-		if (typeof Clerk !== 'undefined' && Clerk.session && Clerk.session.id) {
-			try {
-				const token = await Clerk.session.getToken();
-				if (token) {
-					headers['Authorization'] = `Bearer ${token}`;
-				} else {
-				}
-			} catch (authError) {
-				console.warn(
-					'Error retrieving Clerk token, proceeding without authentication.',
-					authError,
-				);
-			}
-		} else {
-		}
-
-
-		const response = await fetch('https://share.mindmapwizard.com/', {
-			method: 'POST',
-			headers: headers,
-			body: JSON.stringify({
-				mmjson: mmjsonPayload
-			}),
-		});
-		if (!response.ok) {
-			let errorData = {
-				message: `Failed to share mindmap. Status: ${response.status}`,
-			};
-			try {
-				errorData = await response.json();
-			} catch (e) {
-				console.error('Failed to parse error response JSON:', e);
-			}
-			throw new Error(
-				errorData.message || `Failed to share mindmap. Status: ${response.status}`,
-			);
-		}
-
-		const data = await response.json();
-
-		const shareUrl = `https://mindmapwizard.com/view.html?id=${data.id}`;
+		const safeName = String(topic).replace(/[^a-z0-9\-_ ]/gi, '').trim() || 'mindmap';
+		const filename = `${safeName}.mmw.json`;
+		const blob = new Blob([mmjsonStr], { type: 'application/json' });
+		const blobUrl = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = blobUrl;
+		link.download = filename;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(blobUrl);
 
 		dialog.innerHTML = `
-			  <div id="dialog-qr-code-container" style="margin: 20px auto; width: 144px; height: 144px;" class="qr-code-container"></div>
-			  <hr style="border: 1px solid; border-color: var(--light-grey); border-radius: 5px; margin: 10px 0 10px 0;" class="qr-code-container-hr">
 			  <h3>Share Mind Map</h3>
-			  <p>Scan the qr code or copy this link to share your mind map.</p>
-			  <input type="text" class="share-link" value="${shareUrl}" readonly>
+			  <p>Your mind map was exported as <strong>${filename}</strong>. Nothing was sent to any server — share the file directly with others.</p>
 			  <div class="dialog-buttons">
 				  <button class="dialog-button cancel" onclick="closeShareDialog()">Close</button>
-				  <button class="dialog-button confirm" onclick="copyShareLink()">Copy Link</button>
 			  </div>
 		  `;
-
-		const qrCodeContainerInDialog = dialog.querySelector(
-			'#dialog-qr-code-container',
-		);
-
-		if (qrCodeContainerInDialog) {
-			try {
-				await loadQRCodeLibrary();
-
-				new QRCode(qrCodeContainerInDialog, {
-					text: shareUrl,
-					width: 128,
-					height: 128,
-					colorDark: '#000000',
-					colorLight: '#ffffff',
-					correctLevel: QRCode.CorrectLevel.H,
-				});
-			} catch (qrError) {
-				console.error('Error loading QR code library or generating QR code:', qrError);
-				qrCodeContainerInDialog.innerHTML = '<p style="color: red; text-align: center; font-size: 12px;">QR code unavailable</p>';
-			}
-		} else {
-			console.error(
-				"QR code container '#dialog-qr-code-container' not found in dialog.",
-			);
-			dialog.innerHTML +=
-				'<p style="color: red; text-align: center;">Error: Could not display QR code.</p>';
-		}
 	} catch (error) {
 		console.error('Error sharing mindmap:', error);
 		dialog.innerHTML = `

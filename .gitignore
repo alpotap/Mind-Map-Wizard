@@ -12,6 +12,7 @@ desktop.ini
 # localStorage/IndexedDB, not on disk, but keep these in case tooling adds logs)
 *.log
 logs/
+local-data/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -1292,6 +1292,11 @@ async function autoSaveMindMapToBackend() {
         return;
     }
 
+    const jsonContent = editor.value;
+    if (typeof window.saveCurrentMindmapToHistory === 'function') {
+        window.saveCurrentMindmapToHistory(jsonContent);
+    }
+
     if (typeof window.mmJsonToMarkdown !== 'function') {
         return;
     }
@@ -1301,7 +1306,6 @@ async function autoSaveMindMapToBackend() {
     }
 
     try {
-        const jsonContent = editor.value;
         const markdown = jsonContent;
 
         const saveFn = window.saveMindMap || saveMindMap;
@@ -1829,24 +1833,9 @@ function attachEventListeners() {
                 return;
             }
             e.stopPropagation();
-            clickCount++;
-
-            if (clickTimer) {
-                clearTimeout(clickTimer);
-            }
-
-            if (clickCount === 3) {
-                editNodeText(node);
-                clickCount = 0;
-            } else {
-                clickTimer = setTimeout(() => {
-                    if (clickCount === 1) {
-                        showContextMenu(e);
-                    } else if (clickCount === 2) {
-                        editNodeText(node);
-                    }
-                    clickCount = 0;
-                }, clickDelay);
+            const nodeId = node.getAttribute('data-node-id');
+            if (nodeId && window.openNotesDrawer) {
+                window.openNotesDrawer(nodeId, 'click');
             }
         });
 
@@ -1933,6 +1922,20 @@ function attachEventListeners() {
             showContextMenu(e);
         });
         svg.__mmwContextHandlerAttached = true;
+    }
+
+    if (!svg.__mmwNotesClickHandlerAttached) {
+        svg.addEventListener('click', (e) => {
+            if (window.MMW_READONLY || e.button !== 0) return;
+            if (e.target.closest?.('.mm-add-btn, .mmw-checkbox, .mm-expand-btn')) return;
+            const nodeElement = e.target.closest?.('.mm-node');
+            const nodeId = nodeElement?.getAttribute('data-node-id');
+            if (!nodeId || !window.openNotesDrawer) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.openNotesDrawer(nodeId, 'click');
+        }, true);
+        svg.__mmwNotesClickHandlerAttached = true;
     }
 
     if (!svg.__mmwCheckboxHandlerAttached) {
@@ -2891,14 +2894,14 @@ function showContextMenu(e) {
                             Add Image
                         </div>` : ''}
                         
-                         ${(!targetNode.notes) ? `<div class="context-menu-button" onclick="window.openNotesDrawer('${targetNode.id}', 'menu')">
+                         <div class="context-menu-button" onclick="window.openNotesDrawer('${targetNode.id}', 'menu')">
                             <svg xmlns="http://www.w3.org/2000/svg" width="1.3rem" height="1.3rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: -2px;">
                                 <path d="M21 5H3"/>
                                 <path d="M15 12H3"/>
                                 <path d="M17 19H3"/>
                             </svg>
-                            Add Notes
-                        </div>` : ''}
+                            Open Research Notes
+                        </div>
 
                         ${targetNode && targetNode.checked === undefined ? `<div class="context-menu-button" onclick="window.toggleCheckbox()">
                             <svg xmlns="http://www.w3.org/2000/svg" width="1.3rem" height="1.3rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: -2px;">
@@ -2928,7 +2931,7 @@ function showContextMenu(e) {
                                 <path d="M13 21h8"/>
                                 <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5 .5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
                             </svg>
-                            Edit Node
+                            Edit Branch Title
                         </div>` : ''}
                         
                         ${(targetNode && targetNode.text && typeof targetNode.text === 'string' && window.isImageRef && window.isImageRef(targetNode.text)) ? `<div class="context-menu-button has-submenu" onmouseenter="showImageSizeSubmenu(event, '${targetNode.imageSize || 'medium'}')">

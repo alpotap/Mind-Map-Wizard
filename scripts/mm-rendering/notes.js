@@ -3,6 +3,10 @@ const activeNotesGenerations = new Set();
 const CITATION_BLOCK_START = '<!--MM_CITATIONS_DATA:';
 const CITATION_BLOCK_END = '-->';
 
+function normalizeNodeNoteText(text) {
+    return String(text || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n');
+}
+
 function parseNodeNotes(rawNotes) {
     if (!rawNotes) return { text: '', citations: [] };
 
@@ -13,7 +17,7 @@ function parseNodeNotes(rawNotes) {
             try {
                 const jsonStr = rawNotes.substring(startIdx + CITATION_BLOCK_START.length, endIdx);
                 const citations = JSON.parse(jsonStr);
-                const text = rawNotes.substring(0, startIdx).trim();
+                const text = normalizeNodeNoteText(rawNotes.substring(0, startIdx).trim());
                 if (window.dataLayer) {
                     window.dataLayer.push({
                         event: 'mm_notes_opened'
@@ -28,18 +32,19 @@ function parseNodeNotes(rawNotes) {
             }
         }
     }
-    return { text: rawNotes, citations: [] };
+    return { text: normalizeNodeNoteText(rawNotes), citations: [] };
 }
 
 function serializeNodeNotes(text, citations) {
-    if (!citations || citations.length === 0) return text;
+    const normalizedText = normalizeNodeNoteText(text).trim();
+    if (!citations || citations.length === 0) return normalizedText;
 
     const cleanCitations = citations.map(c => ({
         title: c.title || '',
         url: c.url || ''
     }));
 
-    return `${text.trim()}\n\n${CITATION_BLOCK_START}${JSON.stringify(cleanCitations)}${CITATION_BLOCK_END}`;
+    return `${normalizedText}\n\n${CITATION_BLOCK_START}${JSON.stringify(cleanCitations)}${CITATION_BLOCK_END}`;
 }
 
 function isImageNode(node) {
@@ -59,15 +64,7 @@ function showAIResearchButton(editorDiv, nodeId, drawer) {
     btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white" stroke="white" stroke-linecap="round" stroke-linejoin="round" ><path d="M18.5 3.05 Q19.08 5.93 21.95 6.5 Q19.08 7.08 18.5 9.95 Q17.92 7.08 15.05 6.5 Q17.92 5.93 18.5 3.05 Z" stroke-width="1.5" /><path d="M8.5 7.7 Q9.56 13.44 15.3 14.5 Q9.56 15.56 8.5 21.3 Q7.44 15.56 1.7 14.5 Q7.44 13.44 8.5 7.7 Z" stroke-width="1.7" /></svg> AI Research`;
     btn.title = 'Generate AI summary';
     btn.onclick = () => {
-        const node = findNodeByIdGlobal(currentHierarchy, nodeId);
-        const { text, citations } = parseNodeNotes(node ? node.notes : '');
-        const hasContent = (text && text.trim() !== '') || (citations && citations.length > 0);
-
-        if (hasContent) {
-            showAIReplaceConfirmPopup(nodeId, editorDiv);
-        } else {
-            startAIGeneration(nodeId, editorDiv);
-        }
+        startAIGeneration(nodeId, editorDiv);
     };
 
     const header = drawer.querySelector('.notes-drawer-header');
@@ -124,6 +121,8 @@ function showLoadingSkeleton(editorDiv) {
 
 function startAIGeneration(nodeId, editorDiv) {
     if (activeNotesGenerations.has(nodeId)) return;
+    const askButton = document.getElementById('notes-ask-ai-btn');
+    if (askButton) askButton.disabled = true;
     showLoadingSkeleton(editorDiv);
     generateNotesWithAI(nodeId, editorDiv);
 }
@@ -145,6 +144,13 @@ window.openNotesDrawer = function (nodeId, source) {
     if (typeof window.__mmwApplyNotesOutline === 'function') window.__mmwApplyNotesOutline();
 
     if (drawer && title && editorDiv) {
+        drawer.classList.remove('notes-expanded');
+        drawer.classList.add('notes-collapsed');
+        const toggleExpandButton = document.getElementById('notes-toggle-expand-btn');
+        if (toggleExpandButton) {
+            toggleExpandButton.textContent = 'Expand';
+            toggleExpandButton.title = 'Expand notes';
+        }
         if (isImage) {
             title.textContent = 'Image';
         } else {
@@ -189,9 +195,8 @@ window.openNotesDrawer = function (nodeId, source) {
                 showAIResearchButton(editorDiv, nodeId, drawer);
             }
         } else {
-            editorDiv.innerHTML = renderNotes(text, citations, true, true);
+            editorDiv.textContent = text;
             drawer.classList.add('open');
-            animateResourcesIn(editorDiv);
             showAIResearchButton(editorDiv, nodeId, drawer);
             if (!isReadOnly) {
                 setTimeout(() => editorDiv.focus(), 100);
@@ -206,6 +211,8 @@ window.closeNotesDrawer = function () {
         if (!drawer) return; 
 
         drawer.classList.remove('open');
+        drawer.classList.remove('notes-expanded');
+        drawer.classList.add('notes-collapsed');
         window.__mmwNotesActiveNodeId = null;
         if (typeof window.__mmwApplyNotesOutline === 'function') window.__mmwApplyNotesOutline();
         const editorDiv = document.getElementById('notes-drawer-editor');
@@ -305,7 +312,11 @@ async function generateNotesWithAI(nodeId, editorDiv) {
 
     try {
         const branchContext = window.getBranchContext ? window.getBranchContext(nodeId) : '';
-        const context = branchContext || node.text;
+        const { text: existingNotes, citations: existingCitations } = parseNodeNotes(node.notes);
+        const questionInput = document.getElementById('notes-question-input');
+        const question = questionInput?.value.trim() || 'Explore this topic further.';
+        const context = `Hierarchy path:\n${branchContext || node.text}\n\nExisting node notes and prior research:\n${existingNotes || '(none)'}\n\nQuestion to answer:\n${question}`;
+        const researchHeader = `## Research - ${new Date().toLocaleString()}\n\n**Question:** ${question}\n\n`;
 
         const apiKey = typeof getStoredApiKey === 'function' ? getStoredApiKey() : '';
         const requiresApiKey = typeof window.aiRequiresApiKey === 'function' ? window.aiRequiresApiKey() : true;
@@ -321,17 +332,13 @@ async function generateNotesWithAI(nodeId, editorDiv) {
             ? '3. Search the web for current, factual information about ONLY the target topic'
             : '3. Use your internal knowledge base to provide factual information about ONLY the target topic';
 
-        const systemPrompt = `You are a research assistant. Your task:
-
-        1. Identify the node with the LOWEST hierarchy (fewest # symbols) - this is your target topic
-        2. The other nodes with more # symbols are only context - DO NOT write about them
-        ${searchInstruction}
-        4. Write a concise, information-dense summary of exactly 600 characters (±50)
-        5. Use clear, simple language
-        6. Do not mention the character count in your response
-        7. The generated notes should be in the same language as the context.
-
-        Example: If given "## Physics > ### Quantum > #### Entanglement", write ONLY about Entanglement (4 #'s = lowest hierarchy).`;
+        const notesPromptFallback = `You are a research assistant. The user message includes a hierarchy path, existing node notes, and a question.
+The LAST and deepest item in the hierarchy path is the target topic. Use the ancestors and existing notes as context, then answer the question directly.
+{{search_instruction}}
+Write a concise, information-dense summary of about 600 characters in the context language. Do not mention the character count.`;
+		const systemPrompt = typeof window.getPromptTemplate === 'function'
+			? await window.getPromptTemplate('NODE_NOTES', notesPromptFallback, { search_instruction: searchInstruction })
+			: notesPromptFallback.replace('{{search_instruction}}', searchInstruction);
 
         const plugins = useWebSearch ? [{ id: 'web', max_results: 3 }] : [];
 
@@ -382,7 +389,7 @@ async function generateNotesWithAI(nodeId, editorDiv) {
         const decoder = new TextDecoder();
 
         let fullText = '';
-        let citations = [];
+        let citations = [...existingCitations];
         let isFirstChunk = true;
         let lineBuffer = '';
 
@@ -419,13 +426,10 @@ async function generateNotesWithAI(nodeId, editorDiv) {
                                 const content = delta.content;
                                 fullText += content;
 
-                                if (isFirstChunk) {
-                                    editorDiv.innerHTML = '';
-                                    isFirstChunk = false;
-                                }
+                                isFirstChunk = false;
 
                                 editorDiv.currentCitations = citations;
-                                editorDiv.innerHTML = renderNotes(fullText, citations, false);
+                                editorDiv.textContent = `${existingNotes}${existingNotes ? '\n\n' : ''}${researchHeader}${fullText}`;
                                 editorDiv.scrollTop = editorDiv.scrollHeight;
                             }
                         }
@@ -434,9 +438,9 @@ async function generateNotesWithAI(nodeId, editorDiv) {
             }
         }
 
+        const combinedNotes = `${existingNotes}${existingNotes ? '\n\n' : ''}${researchHeader}${fullText}`;
         editorDiv.currentCitations = citations;
-        editorDiv.innerHTML = renderNotes(fullText, citations, true, true);
-        animateResourcesIn(editorDiv);
+        editorDiv.textContent = combinedNotes;
 
 
         if (window.dataLayer) {
@@ -448,11 +452,9 @@ async function generateNotesWithAI(nodeId, editorDiv) {
             window.rybbit.event("mm_notes_opened", {});
         }
         node.citations = citations;
-        if (!fullText || fullText.trim() === '') {
-            delete node.notes;
-        } else {
-            node.notes = serializeNodeNotes(fullText, citations);
-        }
+        if (!fullText || fullText.trim() === '') throw new Error('AI returned no research content');
+        node.notes = serializeNodeNotes(combinedNotes, citations);
+        if (questionInput) questionInput.value = '';
 
         const json = __mmwComposeJsonWithCurrentSettings(currentHierarchy);
         const editorEl = (typeof editor !== 'undefined') ? editor : document.getElementById('json-editor');
@@ -482,6 +484,8 @@ async function generateNotesWithAI(nodeId, editorDiv) {
         }
     } finally {
         activeNotesGenerations.delete(nodeId);
+        const askButton = document.getElementById('notes-ask-ai-btn');
+        if (askButton) askButton.disabled = false;
     }
 }
 
@@ -737,9 +741,76 @@ function setTextOffset(root, startOffset, endOffset) {
 function initNotesDrawer() {
     const closeBtn = document.getElementById('notes-drawer-close');
     const editorDiv = document.getElementById('notes-drawer-editor');
+    const questionInput = document.getElementById('notes-question-input');
+    const askButton = document.getElementById('notes-ask-ai-btn');
+    const addManualButton = document.getElementById('notes-add-manual-btn');
+    const toggleExpandButton = document.getElementById('notes-toggle-expand-btn');
+    const duckAiButton = document.getElementById('notes-duck-ai-btn');
+    const drawer = document.getElementById('notes-drawer');
+
+    if (!editorDiv || editorDiv.dataset.notesDrawerBound === 'true') return;
+    editorDiv.dataset.notesDrawerBound = 'true';
 
     if (closeBtn) {
         closeBtn.addEventListener('click', window.closeNotesDrawer);
+    }
+
+    if (addManualButton) {
+        addManualButton.addEventListener('click', () => {
+            const nodeId = window.__mmwNotesActiveNodeId;
+            if (!nodeId || !editorDiv || window.MMW_READONLY) return;
+            const entry = `## Manual note - ${new Date().toLocaleString()}\n\n`;
+            editorDiv.textContent = `${editorDiv.innerText.trim()}${editorDiv.innerText.trim() ? '\n\n' : ''}${entry}`;
+            editorDiv.dispatchEvent(new Event('input', { bubbles: true }));
+            editorDiv.focus();
+            const range = document.createRange();
+            range.selectNodeContents(editorDiv);
+            range.collapse(false);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+        });
+    }
+
+    if (toggleExpandButton && drawer) {
+        toggleExpandButton.addEventListener('click', () => {
+            const expanded = drawer.classList.toggle('notes-expanded');
+            drawer.classList.toggle('notes-collapsed', !expanded);
+            toggleExpandButton.textContent = expanded ? 'Collapse' : 'Expand';
+            toggleExpandButton.title = expanded ? 'Collapse notes' : 'Expand notes';
+        });
+    }
+
+    if (duckAiButton) {
+        duckAiButton.addEventListener('click', async () => {
+            const nodeId = window.__mmwNotesActiveNodeId;
+            const node = nodeId ? findNodeByIdGlobal(currentHierarchy, nodeId) : null;
+            if (!node) return;
+            const { text } = parseNodeNotes(node.notes);
+            const context = `Mind map hierarchy:\n${window.getBranchContext ? window.getBranchContext(nodeId) : node.text}\n\nNode notes and research:\n${text || '(none)'}`;
+            try {
+                await navigator.clipboard.writeText(context);
+                duckAiButton.textContent = 'Copied';
+                setTimeout(() => { duckAiButton.textContent = 'Ask Duck.ai'; }, 1500);
+            } catch (error) {
+                console.warn('Could not copy Duck.ai context:', error);
+            }
+            window.open('https://duck.ai', '_blank', 'noopener');
+        });
+    }
+
+    const askActiveNode = () => {
+        const nodeId = window.__mmwNotesActiveNodeId;
+        if (nodeId && editorDiv) startAIGeneration(nodeId, editorDiv);
+    };
+
+    if (askButton) askButton.addEventListener('click', askActiveNode);
+    if (questionInput) {
+        questionInput.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                askActiveNode();
+            }
+        });
     }
 
     if (editorDiv) {
@@ -751,13 +822,7 @@ function initNotesDrawer() {
             const node = findNodeByIdGlobal(currentHierarchy, nodeId);
 
             if (node) {
-                const resourcesBlock = editorDiv.querySelector('.notes-resources');
-                if (resourcesBlock) {
-                    resourcesBlock.remove();
-                }
-
-                const val = domToMarkdown(e.target);
-                const { start: startOffset, end: endOffset } = getCursorOffset(e.target);
+                const val = normalizeNodeNoteText(e.target.innerText);
                 const currentCitations = editorDiv.currentCitations || node.citations || [];
 
                 if (!val || val.trim() === '') {
@@ -767,17 +832,6 @@ function initNotesDrawer() {
                     node.notes = serializeNodeNotes(val, currentCitations);
                     node.citations = currentCitations;
                 }
-
-                e.target.innerHTML = renderNotes(val, currentCitations, false);
-
-                if (resourcesBlock) {
-                    e.target.appendChild(resourcesBlock);
-                } else if (currentCitations.length > 0) {
-                    const resHtml = renderResources(currentCitations);
-                    if (resHtml) e.target.insertAdjacentHTML('beforeend', resHtml);
-                }
-
-                setTextOffset(e.target, startOffset, endOffset);
 
                 const json = __mmwComposeJsonWithCurrentSettings(currentHierarchy);
                 const editorEl = (typeof editor !== 'undefined') ? editor : document.getElementById('json-editor');

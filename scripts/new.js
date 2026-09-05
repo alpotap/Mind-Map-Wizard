@@ -42,7 +42,7 @@ function saveApiKey() {
 
 	if (apiKey) {
 		const encryptedApiKey = encryptApiKey(apiKey);
-		localStorage.setItem('openrouter-api-key-encrypted', encryptedApiKey);
+		localStorage.setItem(`${API_KEY_STORAGE_PREFIX}${getAiProvider()}`, encryptedApiKey);
 		apiKeyInput.value = '';
 
 		const saveBtn = document.getElementById('save-api-key');
@@ -66,8 +66,9 @@ function loadApiKey() {
 	}
 }
 
-function getStoredApiKey() {
-	const encryptedApiKey = localStorage.getItem('openrouter-api-key-encrypted');
+function getStoredApiKey(provider = getAiProvider()) {
+	const encryptedApiKey = localStorage.getItem(`${API_KEY_STORAGE_PREFIX}${provider}`)
+		|| (provider === 'openrouter' ? localStorage.getItem('openrouter-api-key-encrypted') : '');
 	if (!encryptedApiKey) return '';
 
 	return decryptApiKey(encryptedApiKey);
@@ -77,9 +78,116 @@ function getStoredApiKey() {
 const AI_PROVIDER_KEY = 'mmw-ai-provider';
 const OLLAMA_BASE_URL_KEY = 'mmw-ollama-base-url';
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+const AZURE_FOUNDRY_URL_KEY = 'mmw-azure-foundry-url';
+const BEDROCK_URL_KEY = 'mmw-bedrock-url';
+const AZURE_FOUNDRY_MODEL_KEY = 'mmw-azure-foundry-model';
+const BEDROCK_MODEL_KEY = 'mmw-bedrock-model';
+const CLOUD_AUTH_MODE_KEY = 'mmw-cloud-auth-mode';
+const API_KEY_STORAGE_PREFIX = 'mmw-api-key-encrypted-';
+const SHARED_HISTORY_ENDPOINT = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+	? `${window.location.protocol}//${window.location.hostname}:8001/api/mindmap-history`
+	: '/api/mindmap-history';
+let sharedHistoryReady = false;
+let sharedHistorySyncTimer = null;
+
+function parseMindmapHistory(value) {
+	try {
+		const history = JSON.parse(value || '[]');
+		return Array.isArray(history) ? history : [];
+	} catch {
+		return [];
+	}
+}
+
+async function saveSharedMindmapHistory(history) {
+	if (!sharedHistoryReady) return;
+	try {
+		await fetch(SHARED_HISTORY_ENDPOINT, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(history)
+		});
+	} catch (error) {
+		console.warn('Shared local history is unavailable; using this browser only.', error);
+	}
+}
+
+async function initializeSharedMindmapHistory() {
+	try {
+		const response = await fetch(SHARED_HISTORY_ENDPOINT, { cache: 'no-store' });
+		if (!response.ok) throw new Error(`Status ${response.status}`);
+		const diskHistory = await response.json();
+		if (!Array.isArray(diskHistory)) throw new Error('Invalid history response');
+		const merged = new Map();
+		for (const item of [...diskHistory, ...parseMindmapHistory(localStorage.getItem('mindmap-history'))]) {
+			if (!item?.id) continue;
+			const existing = merged.get(String(item.id));
+			if (!existing || new Date(item.timestamp) >= new Date(existing.timestamp)) merged.set(String(item.id), item);
+		}
+		const history = Array.from(merged.values()).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 100);
+		localStorage.setItem('mindmap-history', JSON.stringify(history));
+		sharedHistoryReady = true;
+		await saveSharedMindmapHistory(history);
+	} catch (error) {
+		console.warn('Shared local history is unavailable; using this browser only.', error);
+	}
+}
+
+function scheduleSharedHistorySave(history) {
+	if (!sharedHistoryReady) return;
+	clearTimeout(sharedHistorySyncTimer);
+	sharedHistorySyncTimer = setTimeout(() => saveSharedMindmapHistory(history), 200);
+}
+
+const nativeStorageSetItem = Storage.prototype.setItem;
+Storage.prototype.setItem = function (key, value) {
+	nativeStorageSetItem.call(this, key, value);
+	if (this === localStorage && key === 'mindmap-history') {
+		scheduleSharedHistorySave(parseMindmapHistory(value));
+	}
+};
+
+window.initializeSharedMindmapHistory = initializeSharedMindmapHistory;
+
+window.saveCurrentMindmapToHistory = function (mindmapJsonStr) {
+	try {
+		const id = new URL(window.location.href).searchParams.get('id') || window.currentMindmap?.id;
+		if (!id) return;
+		const history = parseMindmapHistory(localStorage.getItem('mindmap-history'));
+		const index = history.findIndex((item) => String(item.id) === String(id));
+		if (index < 0) return;
+		history[index] = { ...history[index], mindmap: mindmapJsonStr, timestamp: new Date().toISOString() };
+		localStorage.setItem('mindmap-history', JSON.stringify(history));
+	} catch (error) {
+		console.warn('Failed to update local mind map history:', error);
+	}
+};
+const PROMPT_FILE_URL = '/prompt.txt';
+
+async function getPromptTemplate(section, fallback, variables = {}) {
+	try {
+		const response = await fetch(PROMPT_FILE_URL, { cache: 'no-store' });
+		if (!response.ok) throw new Error(`Status ${response.status}`);
+		const text = await response.text();
+		const marker = `[${section}]`;
+		const start = text.indexOf(marker);
+		if (start < 0) throw new Error(`Missing ${marker}`);
+		const bodyStart = start + marker.length;
+		const nextSection = text.indexOf('\n[', bodyStart);
+		const template = text.slice(bodyStart, nextSection < 0 ? text.length : nextSection).trim();
+		if (!template) throw new Error(`Empty ${marker}`);
+		return template.replace(/\{\{(\w+)\}\}/g, (match, name) => variables[name] ?? match);
+	} catch (error) {
+		console.warn(`Using built-in ${section} prompt:`, error);
+		return fallback.replace(/\{\{(\w+)\}\}/g, (match, name) => variables[name] ?? match);
+	}
+}
+
+window.getPromptTemplate = getPromptTemplate;
 
 function getAiProvider() {
-	return localStorage.getItem(AI_PROVIDER_KEY) === 'ollama' ? 'ollama' : 'openrouter';
+	const provider = localStorage.getItem(AI_PROVIDER_KEY);
+	return ['ollama', 'azure-foundry', 'bedrock'].includes(provider) ? provider : 'openrouter';
 }
 
 function isLocalProvider() {
@@ -91,17 +199,27 @@ function getOllamaBaseUrl() {
 	return (stored || DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, '');
 }
 
+function getCloudEndpoint(provider = getAiProvider()) {
+	const key = provider === 'azure-foundry' ? AZURE_FOUNDRY_URL_KEY : BEDROCK_URL_KEY;
+	return (localStorage.getItem(key) || '').trim().replace(/\/+$/, '');
+}
+
+function getCloudModel(provider = getAiProvider()) {
+	const key = provider === 'azure-foundry' ? AZURE_FOUNDRY_MODEL_KEY : BEDROCK_MODEL_KEY;
+	return (localStorage.getItem(key) || '').trim();
+}
+
 // Ollama exposes an OpenAI-compatible API, so the request shape is shared.
 function getChatCompletionsUrl() {
-	return isLocalProvider()
-		? `${getOllamaBaseUrl()}/v1/chat/completions`
-		: 'https://openrouter.ai/api/v1/chat/completions';
+	if (isLocalProvider()) return `${getOllamaBaseUrl()}/v1/chat/completions`;
+	if (getAiProvider() === 'openrouter') return 'https://openrouter.ai/api/v1/chat/completions';
+	return getCloudEndpoint();
 }
 
 function getModelsUrl() {
-	return isLocalProvider()
-		? `${getOllamaBaseUrl()}/v1/models`
-		: 'https://openrouter.ai/api/v1/models';
+	if (isLocalProvider()) return `${getOllamaBaseUrl()}/v1/models`;
+	if (getAiProvider() === 'openrouter') return 'https://openrouter.ai/api/v1/models';
+	return `${getCloudEndpoint().replace(/\/chat\/completions(?:\?.*)?$/, '')}/models`;
 }
 
 // Local providers run on the user's machine and need no API key.
@@ -115,10 +233,15 @@ function getAiRequestHeaders(apiKey) {
 	};
 	// OpenRouter-only headers: local providers like Ollama don't allow-list
 	// these in their CORS config, so sending them there breaks the preflight.
-	if (!isLocalProvider()) {
+	if (getAiProvider() === 'openrouter') {
 		headers['HTTP-Referer'] = window.location.origin;
 		headers['X-Title'] = 'Mind Map Wizard';
-		headers['Authorization'] = `Bearer ${apiKey || getStoredApiKey()}`;
+	}
+	if (!isLocalProvider()) {
+		const authMode = localStorage.getItem(CLOUD_AUTH_MODE_KEY) || 'bearer';
+		const key = apiKey || getStoredApiKey();
+		if (authMode === 'api-key') headers['api-key'] = key;
+		else headers['Authorization'] = `Bearer ${key}`;
 	}
 	return headers;
 }
@@ -139,6 +262,7 @@ window.getAiRequestHeaders = getAiRequestHeaders;
 window.finalizeAiPayload = finalizeAiPayload;
 window.isLocalProvider = isLocalProvider;
 window.aiRequiresApiKey = aiRequiresApiKey;
+window.getCloudModel = getCloudModel;
 
 function showApiKeyPopup(onSavedAction = null, showLoading = false) {
 	const existingPopup = document.getElementById('api-key-popup');
@@ -164,7 +288,7 @@ function showApiKeyPopup(onSavedAction = null, showLoading = false) {
 	popup.innerHTML = `
 		<div class="api-key-popup-content">
 			<div class="popup-header">
-				<h3>OpenRouter API Key Required</h3>
+				<h3>API Key Required</h3>
 				<button class="popup-close" id="close-api-key-popup">
 					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<path d="M18 6 6 18"></path>
@@ -173,11 +297,7 @@ function showApiKeyPopup(onSavedAction = null, showLoading = false) {
 				</button>
 			</div>
 			<div class="popup-body">
-				<p>To generate mind maps, you need an OpenRouter API key.</p>
-				<div style="margin-bottom: 20px; font-size: 0.95em; color: var(--text-color); opacity: 0.8; line-height: 1.5;">
-					Get your API key at:<br>
-					<a href="https://openrouter.ai/keys" target="_blank" style="color: var(--primary-color); text-decoration: none; font-weight: 500;">openrouter.ai/keys</a>
-				</div>
+				<p>Enter the API key for the selected cloud provider.</p>
 				<div style="margin-bottom: 12px;">
 					<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">API Key</label>
 					<input type="password" id="popup-api-key-input" placeholder="sk-or-v1-..." class="popup-input" style="margin-bottom: 16px;">
@@ -207,7 +327,7 @@ function showApiKeyPopup(onSavedAction = null, showLoading = false) {
 		const apiKey = input.value.trim();
 		if (apiKey) {
 			const encryptedApiKey = encryptApiKey(apiKey);
-			localStorage.setItem('openrouter-api-key-encrypted', encryptedApiKey);
+			localStorage.setItem(`${API_KEY_STORAGE_PREFIX}${getAiProvider()}`, encryptedApiKey);
 			popup.remove();
 			const loadingAnim = document.getElementById('loading-animation');
 			if (loadingAnim && showLoading) loadingAnim.style.display = 'flex';
@@ -249,6 +369,9 @@ function showApiKeyManagement() {
 	const currentApiKey = getStoredApiKey();
 	let selectedProvider = getAiProvider();
 	const currentOllamaUrl = getOllamaBaseUrl();
+	const currentCloudEndpoint = getCloudEndpoint();
+	const currentCloudModel = getCloudModel();
+	const currentCloudAuthMode = localStorage.getItem(CLOUD_AUTH_MODE_KEY) || 'bearer';
 
 	const popup = document.createElement('div');
 	popup.id = 'api-key-manage-popup';
@@ -267,9 +390,15 @@ function showApiKeyManagement() {
 			<div class="popup-body">
 				<div>
 					<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">AI Provider</label>
-					<div class="provider-options" style="display: flex; gap: 10px; margin-bottom: 20px;">
+					<div class="provider-options" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
 						<button type="button" class="provider-option ${selectedProvider === 'openrouter' ? 'selected' : ''}" data-provider="openrouter">OpenRouter (Cloud)</button>
 						<button type="button" class="provider-option ${selectedProvider === 'ollama' ? 'selected' : ''}" data-provider="ollama">Local (Ollama)</button>
+						<button type="button" class="provider-option ${selectedProvider === 'azure-foundry' ? 'selected' : ''}" data-provider="azure-foundry">Azure Foundry</button>
+						<button type="button" class="provider-option ${selectedProvider === 'bedrock' ? 'selected' : ''}" data-provider="bedrock">AWS Bedrock</button>
+					</div>
+					<div style="margin-bottom: 20px;">
+						<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">Model</label>
+						<select id="manage-model-select" class="popup-input" style="width: 100%;"></select>
 					</div>
 
 					<div id="openrouter-settings" style="display: ${selectedProvider === 'openrouter' ? 'block' : 'none'};">
@@ -285,6 +414,23 @@ function showApiKeyManagement() {
 						<input type="text" id="manage-ollama-url-input" placeholder="${DEFAULT_OLLAMA_BASE_URL}" class="popup-input" style="width: 100%; margin-bottom: 12px;" value="${currentOllamaUrl}">
 						<div style="font-size: 0.85em; color: var(--text-color); opacity: 0.7; margin-bottom: 15px; line-height: 1.5;">
 							Runs models locally & privately with <a href="https://ollama.com" target="_blank" style="color: var(--primary-color);">Ollama</a>. Allow the browser to reach it by starting the server with <code>OLLAMA_ORIGINS='*' ollama serve</code>.
+						</div>
+					</div>
+
+					<div id="cloud-endpoint-settings" style="display: ${['azure-foundry', 'bedrock'].includes(selectedProvider) ? 'block' : 'none'};">
+						<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">OpenAI-compatible chat completions URL</label>
+						<input type="url" id="manage-cloud-url-input" placeholder="https://host/v1/chat/completions" class="popup-input" style="width: 100%; margin-bottom: 12px;" value="${currentCloudEndpoint}">
+						<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">Model or deployment ID</label>
+						<input type="text" id="manage-cloud-model-input" placeholder="Your model or Azure deployment name" class="popup-input" style="width: 100%; margin-bottom: 12px;" value="${currentCloudModel}">
+						<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">API Key</label>
+						<input type="password" id="manage-cloud-api-key-input" placeholder="Enter API key" class="popup-input" style="width: 100%; margin-bottom: 12px;" value="${currentApiKey || ''}">
+						<label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-color);">API request style</label>
+						<select id="manage-cloud-auth-mode" class="popup-input" style="width: 100%; margin-bottom: 12px;">
+							<option value="bearer" ${currentCloudAuthMode === 'bearer' ? 'selected' : ''}>OpenAI-compatible Chat Completions</option>
+							<option value="api-key" ${currentCloudAuthMode === 'api-key' ? 'selected' : ''}>Cloud API-key Chat Completions</option>
+						</select>
+						<div style="font-size: 0.85em; color: var(--text-color); opacity: 0.7; margin-bottom: 15px; line-height: 1.5;">
+							Both choices use the Chat Completions message format. OpenAI-compatible sends <code>Authorization: Bearer</code>; Cloud API-key sends an <code>api-key</code> header. Azure Foundry commonly uses Cloud API-key. AWS Bedrock requires an OpenAI-compatible gateway or proxy; direct browser access to the native Bedrock API requires AWS request signing and is not supported.
 						</div>
 					</div>
 
@@ -304,9 +450,40 @@ function showApiKeyManagement() {
 	const removeBtn = document.getElementById('remove-api-key-btn');
 	const input = document.getElementById('manage-api-key-input');
 	const ollamaInput = document.getElementById('manage-ollama-url-input');
+	const cloudUrlInput = document.getElementById('manage-cloud-url-input');
+	const cloudModelInput = document.getElementById('manage-cloud-model-input');
+	const cloudApiKeyInput = document.getElementById('manage-cloud-api-key-input');
+	const cloudAuthModeInput = document.getElementById('manage-cloud-auth-mode');
+	const modelSelect = document.getElementById('manage-model-select');
 	const openrouterSettings = document.getElementById('openrouter-settings');
 	const ollamaSettings = document.getElementById('ollama-settings');
+	const cloudEndpointSettings = document.getElementById('cloud-endpoint-settings');
 	const providerButtons = popup.querySelectorAll('.provider-option');
+
+	const refreshModelSelect = async () => {
+		const originalProvider = getAiProvider();
+		if (selectedProvider !== originalProvider) localStorage.setItem(AI_PROVIDER_KEY, selectedProvider);
+		await loadModels();
+		if (selectedProvider !== originalProvider) localStorage.setItem(AI_PROVIDER_KEY, originalProvider);
+		if (!modelSelect) return;
+		modelSelect.innerHTML = '';
+		availableModels.forEach((model) => {
+			const option = document.createElement('option');
+			option.value = model.id;
+			option.textContent = model.name || model.id;
+			option.selected = model.id === getLastUsedModel();
+			modelSelect.appendChild(option);
+		});
+		if (availableModels.length === 0) {
+			const option = document.createElement('option');
+			option.textContent = 'Configure a model or check the provider connection';
+			option.disabled = true;
+			option.selected = true;
+			modelSelect.appendChild(option);
+		}
+	};
+
+	refreshModelSelect();
 
 	providerButtons.forEach(btn => {
 		btn.addEventListener('click', () => {
@@ -314,6 +491,11 @@ function showApiKeyManagement() {
 			providerButtons.forEach(b => b.classList.toggle('selected', b === btn));
 			openrouterSettings.style.display = selectedProvider === 'openrouter' ? 'block' : 'none';
 			ollamaSettings.style.display = selectedProvider === 'ollama' ? 'block' : 'none';
+			cloudEndpointSettings.style.display = ['azure-foundry', 'bedrock'].includes(selectedProvider) ? 'block' : 'none';
+			if (cloudUrlInput) cloudUrlInput.value = getCloudEndpoint(selectedProvider);
+			if (cloudModelInput) cloudModelInput.value = getCloudModel(selectedProvider);
+			if (cloudApiKeyInput) cloudApiKeyInput.value = getStoredApiKey(selectedProvider);
+			refreshModelSelect();
 		});
 	});
 
@@ -322,11 +504,21 @@ function showApiKeyManagement() {
 
 		const apiKey = input?.value?.trim();
 		if (apiKey) {
-			localStorage.setItem('openrouter-api-key-encrypted', encryptApiKey(apiKey));
+			localStorage.setItem(`${API_KEY_STORAGE_PREFIX}openrouter`, encryptApiKey(apiKey));
 		}
 
 		const ollamaUrl = ollamaInput?.value?.trim();
 		localStorage.setItem(OLLAMA_BASE_URL_KEY, ollamaUrl || DEFAULT_OLLAMA_BASE_URL);
+		if (['azure-foundry', 'bedrock'].includes(selectedProvider)) {
+			const endpointKey = selectedProvider === 'azure-foundry' ? AZURE_FOUNDRY_URL_KEY : BEDROCK_URL_KEY;
+			const modelKey = selectedProvider === 'azure-foundry' ? AZURE_FOUNDRY_MODEL_KEY : BEDROCK_MODEL_KEY;
+			localStorage.setItem(endpointKey, cloudUrlInput?.value?.trim() || '');
+			localStorage.setItem(modelKey, cloudModelInput?.value?.trim() || '');
+			localStorage.setItem(CLOUD_AUTH_MODE_KEY, cloudAuthModeInput?.value || 'bearer');
+			const cloudApiKey = cloudApiKeyInput?.value?.trim();
+			if (cloudApiKey) localStorage.setItem(`${API_KEY_STORAGE_PREFIX}${selectedProvider}`, encryptApiKey(cloudApiKey));
+		}
+		if (modelSelect?.value) setPreferredModel(modelSelect.value);
 
 		// Refresh the model list to reflect the chosen provider.
 		loadModels();
@@ -345,7 +537,8 @@ function showApiKeyManagement() {
 
 	if (removeBtn) {
 		removeBtn.addEventListener('click', () => {
-			localStorage.removeItem('openrouter-api-key-encrypted');
+			localStorage.removeItem(`${API_KEY_STORAGE_PREFIX}${selectedProvider}`);
+			if (selectedProvider === 'openrouter') localStorage.removeItem('openrouter-api-key-encrypted');
 			popup.remove();
 		});
 	}
@@ -377,6 +570,7 @@ const MODELS_CACHE_KEY = 'openrouter-models-cache';
 const MODELS_CACHE_EXPIRY = 'openrouter-models-expiry';
 const PREFERRED_MODEL_KEY = 'preferred-model';
 const LAST_USED_MODEL_KEY = 'last-used-model';
+const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.5-flash-lite';
 
 document.addEventListener('DOMContentLoaded', function () {
 	loadApiKey();
@@ -484,6 +678,10 @@ function cacheModels(models) {
 
 async function fetchAvailableModels() {
 	try {
+		if (!isLocalProvider() && getAiProvider() !== 'openrouter') {
+			const configuredModel = getCloudModel();
+			return configuredModel ? [{ id: configuredModel, name: configuredModel }] : [];
+		}
 		const response = await fetch(getModelsUrl(), {
 			method: 'GET',
 			headers: {}
@@ -509,16 +707,20 @@ async function fetchAvailableModels() {
 }
 
 function getPreferredModel() {
-	return localStorage.getItem(PREFERRED_MODEL_KEY) || 'google/gemini-2.5-flash-lite';
+	return localStorage.getItem(`${PREFERRED_MODEL_KEY}-${getAiProvider()}`)
+		|| localStorage.getItem(PREFERRED_MODEL_KEY)
+		|| DEFAULT_OPENROUTER_MODEL;
 }
 
 function setPreferredModel(modelId) {
-	localStorage.setItem(PREFERRED_MODEL_KEY, modelId);
-	localStorage.setItem(LAST_USED_MODEL_KEY, modelId);
+	const provider = getAiProvider();
+	localStorage.setItem(`${PREFERRED_MODEL_KEY}-${provider}`, modelId);
+	localStorage.setItem(`${LAST_USED_MODEL_KEY}-${provider}`, modelId);
 }
 
 function getLastUsedModel() {
-	return localStorage.getItem(LAST_USED_MODEL_KEY) || getPreferredModel();
+	const provider = getAiProvider();
+	return localStorage.getItem(`${LAST_USED_MODEL_KEY}-${provider}`) || getPreferredModel();
 }
 
 async function initializeModelSelector() {
@@ -565,6 +767,7 @@ async function loadModels() {
 
 	if (!modelOptions) return;
 
+	selectedModel = getLastUsedModel();
 	modelOptions.innerHTML = '';
 
 	try {
@@ -588,6 +791,8 @@ async function loadModels() {
 				selectedModel = availableModels[0].id;
 				setPreferredModel(selectedModel);
 			}
+		} else if (getAiProvider() !== 'openrouter') {
+			availableModels = models;
 		} else {
 			availableModels = models.filter(model =>
 				model.id &&
@@ -906,13 +1111,7 @@ async function generateMindmap(mindmapTopic, isRegenerate = false) {
 		const searchInstruction = useWebSearch
 			? '- Use web search for current, factual information about the topic (up to 3 sources)'
 			: '- Use only your internal knowledge (no web search)';
-
-		const requestPayload = {
-			model: getSelectedModel(),
-			messages: [
-				{
-					role: 'user',
-					content: `Create a comprehensive, fact-rich mind map about ${mindmapTopic.trim()} using the following structure:
+		const generationPrompt = await getPromptTemplate('MINDMAP_GENERATION', `Create a comprehensive, fact-rich mind map about {{topic}} using the following structure:
 
 # Matching Mind Map Title
 ## Branch 1
@@ -921,27 +1120,22 @@ async function generateMindmap(mindmapTopic, isRegenerate = false) {
 ## Branch 2
 
 - Each text element must be aligned to a specific hierarchical level using a new line plus the appropriate number of # symbols
-- Aim for 2-3 levels of depth to keep the mind map scannable and not overwhelming but keep lenght relative to input depth.
-- For large enumerations (6+ items), combine related items into comma-separated lists within a single branch rather than creating excessive sub-branches
+- Aim for 2-3 levels of depth to keep the mind map scannable and not overwhelming but keep length relative to input depth.
+- Include specific, concrete details and facts, not just category labels
+- Avoid generic structural sections like Overview, Introduction, or Conclusion
+- The title should be as short as possible and have at least 3 branches.
+{{web_search_instruction}}
 
-- Include **specific, concrete details and facts**, not just category labels
-  - Bad: "## Education" 
-  - Good: "## Education: PhD in Physics from MIT (2015)"
-- Avoid generic structural sections like "Overview," "Introduction," or "Conclusion" this is a mind map, not an essay
-- If the topic contains extensive information, prioritize breadth over depth and consolidate where necessary
-- Focus on the most relevant and interesting information that creates a useful knowledge structure
-- Make the branches have different lengths for making the mind map visually more interesting.
-- The mind map should be in the language of the user input.
-- The title should be as short as possible.
-- The mind map should have at least 3 branches going out of the title node.
-- Research Instruction: ${searchInstruction}
+Output exactly this JSON shape:
+{"markdown":"# Main Topic\\n\\n## Subtopic 1"}`,
+			{ topic: mindmapTopic.trim(), web_search_instruction: `Research Instruction: ${searchInstruction}` });
 
-**Output Format:**
-Structure your response exactly like this:
-{
-	"markdown": "# Main Topic\\n\\n## Subtopic 1\\n- Point A\\n- Point B\\n\\n## Subtopic 2\\n- Point C\\n- Point D"
-}  
-`
+		const requestPayload = {
+			model: getSelectedModel(),
+			messages: [
+				{
+					role: 'user',
+					content: generationPrompt
 				}
 			],
 			max_tokens: 2000,
@@ -1190,19 +1384,10 @@ async function expandMindMapNodeCore() {
 		}
 
 		try {
-			const systemPrompt = `You are a helpful assistant that expands specific topics within a mind map. 
-The user will provide the relevant Context (the path leading to the current node to expand).
-
-Your task is to generate detailed child branches for the provided node based on the context.
-
-Rules:
-1. Output MUST be valid Markdown.
-2. The "Target Node" string must be the Root of your response (Level 1 Header '#') and you can rename it if you want.
-3. The new children must be Level 2 Headers ('##') which can have Level 3 children ('###').
-4. You should not generate more than 5 new mind map elements (children across all levels).
-5. Provide detailed, factual, and concrete sub-branches.
-6. The generated content should be in the same language as the context.
-Context: ${branchContext}`;
+			const systemPrompt = await getPromptTemplate('NODE_EXPANSION', `You expand a target node in a mind map.
+Use the hierarchy path as context. Return valid Markdown: the target node as one # heading, then up to five ## or ### child nodes. Be factual and use the context language.
+Hierarchy path:
+{{context}}`, { context: branchContext });
 
 			const requestPayload = {
 				model: getSelectedModel(),
@@ -2758,7 +2943,10 @@ function updatePreview() {
 	});
 }
 
-function handleUrlParameters() {
+async function handleUrlParameters() {
+	if (typeof window.initializeSharedMindmapHistory === 'function') {
+		await window.initializeSharedMindmapHistory();
+	}
 	const params = new URLSearchParams(location.search);
 	const id = params.get('id');
 	const q = params.get('q');
@@ -2777,6 +2965,14 @@ function handleUrlParameters() {
 	} else if (manual === 'true') {
 		createManualMindMap();
 		removeUrlParameter('manual');
+	} else {
+		try {
+			const history = JSON.parse(localStorage.getItem('mindmap-history') || '[]');
+			const latestMindMap = history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+			if (latestMindMap?.id) loadMindMapById(latestMindMap.id);
+		} catch (error) {
+			console.warn('Failed to restore the most recent mind map:', error);
+		}
 	}
 }
 

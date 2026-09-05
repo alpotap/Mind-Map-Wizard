@@ -1,29 +1,56 @@
-Create a comprehensive, fact-rich mind map about: ${input}
+# Mind Map Wizard prompt configuration
+#
+# Edit the text inside any named section. Changes are loaded from this file for
+# each new AI request, so refresh is not required when the app is served locally.
+# Keep the section headings unchanged. Variables written as {{name}} are replaced
+# by the application before the request is sent.
 
-Generate the mind map as Markdown text using the following structure:
+[MINDMAP_GENERATION]
+Create a comprehensive, fact-rich mind map about {{topic}}.
 
+Use this Markdown hierarchy:
 # Matching Mind Map Title
 ## Branch 1
 ### Sub Branch A
 ### Sub Branch B
 ## Branch 2
 
-**Formatting Requirements:**
-- Each text element must be aligned to a specific hierarchical level using a new line plus the appropriate number of # symbols
-- Aim for 2-3 levels of depth to keep the mind map scannable and not overwhelming
-- For large enumerations (6+ items), combine related items into comma-separated lists within a single branch rather than creating excessive sub-branches
+Requirements:
+- Use one line per text element, with # characters to express hierarchy.
+- Use 2-3 levels of depth unless the topic clearly needs more.
+- Include concrete facts and useful detail, not only category labels.
+- Avoid generic branches such as Overview, Introduction, or Conclusion.
+- Use the language of the topic.
+- Use a concise title and at least three top-level branches.
+{{web_search_instruction}}
 
-**Content Requirements:**
-- Include **specific, concrete details and facts**, not just category labels
-  - Bad: "## Education" 
-  - Good: "## Education: PhD in Physics from MIT (2015)"
-- Avoid generic structural sections like "Overview," "Introduction," or "Conclusion" – this is a mind map, not an essay
-- If the topic contains extensive information, prioritize breadth over depth and consolidate where necessary
-- Focus on the most relevant and interesting information that creates a useful knowledge structure
-- Make the branches have different lengths for making the mind map visually more interesting.
+Return only this JSON object:
+{"markdown":"# Main Topic\n\n## Subtopic 1"}
 
-**Output Format:**
-Structure your response exactly like this:
-{
-	"markdown": "# Main Topic\\n\\n## Subtopic 1\\n- Point A\\n- Point B\\n\\n## Subtopic 2\\n- Point C\\n- Point D"
-} 
+[NODE_EXPANSION]
+You expand a target node in a mind map.
+
+The hierarchy path below leads from the root to the target node. Use every ancestor
+as context, but generate children only for the target node. Return valid Markdown:
+- The target node must be one # heading.
+- Add up to five ## or ### child nodes in total.
+- Use detailed, factual, concrete sub-branches.
+- Write in the language used by the hierarchy path.
+
+Hierarchy path:
+{{context}}
+
+[NODE_NOTES]
+You are a research assistant. The user message contains a hierarchy path in
+Markdown, existing node notes and research, and a question.
+
+The LAST and deepest item in that path is the target topic. Every preceding item is
+ancestor context: use it to disambiguate the target, but do not write about those
+ancestors themselves. Use previous notes to keep the research coherent and answer
+the supplied question directly.
+
+{{search_instruction}}
+
+Write a concise, information-dense summary of about 600 characters. Use clear,
+simple language and the same language as the hierarchy path. Do not mention the
+character count.

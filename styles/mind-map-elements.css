@@ -346,12 +346,14 @@
 .notes-drawer-header {
     padding: 16px 20px;
     display: flex;
-    justify-content: space-between;
+    gap: 8px;
     align-items: center;
     font-size: 1.2rem;
 }
 
 #notes-drawer-title {
+    flex: 1;
+    min-width: 0;
     font-weight: 600;
     font-size: 1.2rem;
     color: var(--text-color);
@@ -420,6 +422,46 @@
 
 #notes-drawer-editor::-webkit-scrollbar {
     display: none;
+}
+
+.notes-question-bar {
+    display: flex;
+    gap: 10px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--light-grey);
+    background: var(--white);
+}
+
+#notes-question-input {
+    flex: 1;
+    min-height: 44px;
+    max-height: 96px;
+    padding: 10px 12px;
+    resize: vertical;
+    border: 1px solid var(--light-grey-dark);
+    border-radius: 6px;
+    background: var(--card-background);
+    color: var(--text-color);
+    font: inherit;
+    line-height: 1.4;
+}
+
+#notes-ask-ai-btn {
+    align-self: flex-end;
+    min-width: 76px;
+    height: 42px;
+    border: none;
+    border-radius: 6px;
+    background: var(--secondary-color);
+    color: var(--white);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+}
+
+#notes-ask-ai-btn:disabled {
+    cursor: wait;
+    opacity: 0.65;
 }
 
 #notes-drawer-editor:empty:before {
@@ -998,4 +1040,30 @@
 
 .notes-ai-confirm-generate:hover {
     background: rgba(220, 20, 60, 0.2);
+}
+
+.notes-drawer-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.notes-drawer-action-btn {
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--light-grey-dark);
+    border-radius: 6px;
+    background: var(--card-background);
+    color: var(--text-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.notes-drawer-action-btn:hover {
+    border-color: var(--secondary-color);
+}
+
+.notes-drawer.notes-expanded {
+    width: 100%;
 }

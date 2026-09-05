@@ -731,6 +731,11 @@
     <div id="notes-drawer" class="notes-drawer">
         <div class="notes-drawer-header">
             <span id="notes-drawer-title">Node Notes</span>
+            <div class="notes-drawer-actions">
+                <button id="notes-add-manual-btn" class="notes-drawer-action-btn" title="Add a manual note">Add Note</button>
+                <button id="notes-toggle-expand-btn" class="notes-drawer-action-btn" title="Expand notes">Expand</button>
+                <button id="notes-duck-ai-btn" class="notes-drawer-action-btn" title="Copy node context and open Duck.ai">Ask Duck.ai</button>
+            </div>
             <button id="notes-drawer-close" class="notes-drawer-close-btn" title="Close Notes">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -740,6 +745,10 @@
             </button>
         </div>
         <div id="notes-drawer-editor" contenteditable="true" placeholder="Enter your notes here..."></div>
+        <div class="notes-question-bar">
+            <textarea id="notes-question-input" rows="2" placeholder="Ask a question about this node..."></textarea>
+            <button type="button" id="notes-ask-ai-btn" title="Ask AI about this node">Ask AI</button>
+        </div>
     </div>
 
     <div id="node-expand-loader" class="node-expand-loader">

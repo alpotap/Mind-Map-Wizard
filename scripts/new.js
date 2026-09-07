@@ -434,7 +434,7 @@ function showApiKeyManagement() {
 						</div>
 					</div>
 
-					<div style="display: flex; gap: 10px; margin-top: 30px;">
+					<div class="popup-actions" style="display: flex; gap: 8px; margin-top: 14px;">
 						${currentApiKey ? `<button id="remove-api-key-btn" class="remove-btn" style="flex: 1; margin: 0;">Remove API Key</button>` : ''}
 						<button id="update-api-key-btn" class="popup-save-btn" style="flex: 1;">Done</button>
 					</div>
